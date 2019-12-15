@@ -2,6 +2,7 @@
 import pygame
 from math import sin, cos, pi, inf
 import sys
+import numpy as np
 
 sys.setrecursionlimit(10000)  # увеличиваю глубину рекурсии до 10000
 
@@ -163,36 +164,6 @@ class GectField(object):
                     ans_y = j
         return (ans_x, ans_y)
 
-    def neighbourhood(self, x_pos, y_pos):
-        near = [(x_pos - 1, y_pos), (x_pos - 1, y_pos + 1), (x_pos, y_pos - 1), (x_pos, y_pos + 1),
-                (x_pos + 1, y_pos - 1), (x_pos + 1, y_pos)]
-        return list(filter(lambda s: 0 <= s[0] <= X_SIZE_FIELD-1 and 0 <= s[1] <= Y_SIZE_FIELD-1, near))
-
-    def touchLines(self, x_pos, y_pos, who):
-        near = self.neighbourhood(x_pos, y_pos)
-        list_touch_lines = []
-        for i in near:
-            j = 0
-            while j < len(self.lines[who]):  # сделать рзделение по игрокам
-                if i in self.lines[who][j].line:
-                    list_touch_lines.append(self.lines[who][j])
-                    self.lines[who].pop(j)
-                    j -= 1
-                j += 1
-        return list_touch_lines
-
-    def uniteTouchLines(self, x_pos, y_pos, who):
-        list_touch_lines = self.touchLines(x_pos, y_pos, who)
-        new_gect_line = GectLine(who)
-        new_gect_line.addGect(x_pos, y_pos)
-        for i in list_touch_lines:
-            new_gect_line.addLine(i)
-        self.lines[who].append(new_gect_line)
-        for i in self.lines[0]:
-            print(0, " -  ", i.touch[0], " - ", i.line)
-        for i in self.lines[1]:
-            print(1, " -  ", i.touch[0], " - ", i.line)
-
     def get_Matrix(self):
         ans = []
         for i in range(self.x_size):
@@ -203,145 +174,161 @@ class GectField(object):
                 if self.gects[i][j].mark == -1:  ans[i].append(-1)
         return ans
 
-    def help_Garry(self):
-        wisest = GarryKasparov(self.get_Matrix(), self.lines, ent_accuracy=10)
-        return wisest.help_Garry_Kimovich((count_turn+1)%2)
+    def get_Cells(self, who):
+        ans = set()
+        for i in range(self.x_size):
+            for j in range(self.y_size):
+                if self.gects[i][j].mark == who:
+                    ans.add((i,j))
+        return ans
 
     def click_player(self, event, who):
         # 0 - первый игрок, 1 - второй игрок
         x_coord, y_coord = event.pos
         x_pos, y_pos = self.nearest_point(x_coord, y_coord)
+        print("You push ", x_pos, y_pos)
         if not self.gects[x_pos][y_pos].isMarked():
             self.gects[x_pos][y_pos].change_color(COLOR[who])
             self.change_abroad()
             self.gects[x_pos][y_pos].toMark(who)
-            self.uniteTouchLines(x_pos, y_pos, who)
-            print(self.help_Garry())
-            """print("BEFORE")
-            for i in self.lines[0]:
-                print(0, " -  ", i.touch[0], " - ", i.line)
-            for i in self.lines[1]:
-                print(1, " -  ", i.touch[0], " - ", i.line)
-            print("AFTER")
-            for i in self.lines[0]:
-                print(0, " -  ", i.touch[0], " - ", i.line)
-            for i in self.lines[1]:
-                print(1, " -  ", i.touch[0], " - ", i.line)"""
+            wisest = GarryKasparov(self.get_Matrix())
+            wisest.help_Garry_Kimovich((who+1)%2)
             return True
         return False
 
-    def isWin(self, who):#дебагерский вывод
-        #print("ВЫЗЫВАЕТСЯ ВИН")
-        #list_print = []
-        """for i in range(len(self.gects)):
-            list_print.append([])
-            for j in self.gects[i]:
-                list_print[i].append(j.mark)
-        for i in self.lines[0]:
-            print(0, " -  ", i.touch[0], " - ", i.line)
-        for i in self.lines[1]:
-            print(1, " -  ", i.touch[0], " - ", i.line)
-        for i in list_print:
-            print(i)"""
-        for i in self.lines[who]:
-            if i.touch[0] and i.touch[1]:
-                #print("WIIIN")
-                return True
+    def dfs(self, graph, start, who, visited=None, Matrix = None):
+        #print(start)
+        if visited is None:
+            visited = set()
+        if Matrix is None:
+            Matrix = self.get_Matrix()
+        if who == 0 and start[0] == X_SIZE_FIELD-1:
+            return True
+        if who == 1 and start[1] == Y_SIZE_FIELD-1:
+            return True
+        visited.add(start)
+        #print(start)
+        adding = self.neighbourhood(start[0], start[1], Arr=Matrix, who=who)
+        graph.update(adding)
+        for next in adding - visited:
+            return self.dfs(graph, next, who, visited=visited, Matrix=Matrix)
         return False
 
+    def isWin(self, who):#дебагерский вывод
+        set_of_cells = self.get_Cells(who)
+        if who == 0:
+            check = False
+            for i in range(Y_SIZE_FIELD):
+                if self.gects[0][i].mark == who:
+                    check = max(self.dfs(set_of_cells, (0, i), who), check)
+            return check
+        if who == 1:
+            check = False
+            for i in range(X_SIZE_FIELD):
+                if self.gects[i][0].mark == who:
+                    check = max(self.dfs(set_of_cells, (i, 0), who), check)
+            return check
+        return False
 
-class GarryKasparov(object):
-    def __init__(self, ent_matrix, ent_lines, ent_accuracy = 10000):
-        self.matrix = ent_matrix
-        self.x_size = len(self.matrix)
-        self.y_size = len(self.matrix[0])
-        self.cwin = [0, 0]
-        self.counter = 0
-        self.accuracy = ent_accuracy
-        self.lines = ent_lines
-    def new_task(self, ent_matrix, ent_lines, ent_accuracy = 10000):
-        self.matrix = ent_matrix
-        self.x_size = len(self.matrix)
-        self.y_size = len(self.matrix[0])
-        self.cwin = [0, 0]
-        self.counter = 0
-        self.accuracy = ent_accuracy
-        self.lines = ent_lines
-    def neighbourhood(self, x_pos, y_pos):
+    def neighbourhood(self, x_pos, y_pos, Arr = None, who = None):
         near = [(x_pos - 1, y_pos), (x_pos - 1, y_pos + 1), (x_pos, y_pos - 1), (x_pos, y_pos + 1),
                 (x_pos + 1, y_pos - 1), (x_pos + 1, y_pos)]
-        return list(filter(lambda s: 0 <= s[0] <= X_SIZE_FIELD-1 and 0 <= s[1] <= Y_SIZE_FIELD-1, near))
-    def touchLines(self, x_pos, y_pos, who):
-        near = self.neighbourhood(x_pos, y_pos)
-        list_touch_lines = []
-        for i in near:
-            j = 0
-            while j < len(self.lines[who]):  # сделать рзделение по игрокам
-                if i in self.lines[who][j].line:
-                    list_touch_lines.append(self.lines[who][j])
-                    self.lines[who].pop(j)
-                    j -= 1
-                j += 1
-        return list_touch_lines
-    def uniteTouchLines(self, x_pos, y_pos, who):
-        list_touch_lines = self.touchLines(x_pos, y_pos, who)
-        new_gect_line = GectLine(who)
-        new_gect_line.addGect(x_pos, y_pos)
-        for i in list_touch_lines:
-            new_gect_line.addLine(i)
-        self.lines[who].append(new_gect_line)
-        """for i in self.lines[0]:
-            print(0, " -  ", i.touch[0], " - ", i.line)
-        for i in self.lines[1]:
-            print(1, " -  ", i.touch[0], " - ", i.line)"""
-    def isWin(self, who):
-        for i in self.lines[who]:
-            if i.touch[0] and i.touch[1]:
-                return True
-        return False
-    def search(self, x0, y0, who, deep = None):#counter - вначале показывает кто начинает ходить
-        if deep is None:
-            deep = 0
-        self.counter += 1
-        buf_lines = self.lines
-        self.uniteTouchLines(x0, y0, who)
-        if (self.counter < self.accuracy and deep < 144):
-            print("Номер захода  ",self.counter)
-            for i in field.lines[0]:
-                print(0, " -  ", i.touch[0], " - ", i.line)
-            for i in field.lines[1]:
-                print(1, " -  ", i.touch[0], " - ", i.line)
-            print("\n\n")
-            self.matrix[x0][y0] = who #первый игрок
-            for i in range(self.x_size):
-                for j in range(self.y_size):
-                    if self.matrix[i][j] == -1:
-                        self.search(i, j, (who + 1) % 2, deep = deep + 1)
-            self.matrix[x0][y0] = -1 #нет ничего
+        if Arr is not None:
+            return set(filter(lambda s: 0 <= s[0] <= X_SIZE_FIELD - 1 and 0 <= s[1] <= Y_SIZE_FIELD - 1 and Arr[s[0]][s[1]] == who, near))
         else:
-            if self.isWin(0):
-                self.cwin[0] += 1
-            else:
-                if self.isWin(1):
-                    self.cwin[1] += 1
-        self.lines = buf_lines
-    def help_Garry_Kimovich(self, who):
-        max_win = 0
-        ans = (0, 0)
-        count_fwin = count_swin = 0
-        for i in range(self.x_size):
-            for j in range(self.y_size):
-                self.counter = 0
-                self.cwin[who] = 0
-                if self.matrix[i][j] == 0:
-                    self.search(i, j, who)
-                    if self.cwin[who] > max_win:
-                        ans = (i, j)
-                        max_win = self.cwin[who]
-                        count_fwin = self.cwin[0]
-                        count_swin = self.cwin[1]
-        #print("Ходит: ", who," First win:", count_fwin, " Second win: ", count_swin)
+            return set(filter(lambda s: 0 <= s[0] <= X_SIZE_FIELD - 1 and 0 <= s[1] <= Y_SIZE_FIELD - 1, near))
+
+class GarryKasparov(object):
+    def __init__(self, ent_matrix):
+        self.matrix = np.asarray(ent_matrix)
+        self.x_size = len(ent_matrix)
+        self.y_size = len(ent_matrix[0])
+        self.cwin = [0, 0]
+    def to_Numpy(self, arr):
+        ans = np.array([])
+        for i in arr:
+            buf = np.array([])
+            for j in i:
+                buf = np.append(buf, j)
+            ans = np.append(ans, buf)
         return ans
+    def neighbourhood(self, x_pos, y_pos, who = None):
+        near = [(x_pos - 1, y_pos), (x_pos - 1, y_pos + 1), (x_pos, y_pos - 1), (x_pos, y_pos + 1),
+                (x_pos + 1, y_pos - 1), (x_pos + 1, y_pos)]
+        return set(filter(lambda s: 0 <= s[0] <= X_SIZE_FIELD - 1 and 0 <= s[1] <= Y_SIZE_FIELD - 1 and self.buf_matrix[s[0]][s[1]] == who, near))
+    def dfs(self, graph, start, who, visited=None):
+        if visited is None:
+            visited = set()
+        if who == 0 and start[0] == X_SIZE_FIELD-1:
+            return True
+        if who == 1 and start[1] == Y_SIZE_FIELD-1:
+            return True
+        visited.add(start)
+        adding = self.neighbourhood(start[0], start[1], who=who)
+        graph.update(adding)
+        for next in adding - visited:
+            return self.dfs(graph, next, who, visited=visited)
+        return False
+    def get_Cells(self, who):
+        ans = set()
+        for i in range(X_SIZE_FIELD):
+            for j in range(Y_SIZE_FIELD):
+                if self.buf_matrix[i][j] == who:
+                    ans.add((i,j))
+        return ans
+    def isWin(self, who, Arr):#дебагерский вывод
+        set_of_cells = self.get_Cells(who)
+        if who == 0:
+            check = False
+            for i in range(Y_SIZE_FIELD):
+                if self.buf_matrix[0][i] == who:
+                    check = max(self.dfs(set_of_cells, (0, i), who), check)
+            return check
+        if who == 1:
+            check = False
+            for i in range(X_SIZE_FIELD):
+                if self.buf_matrix[i][0] == who:
+                    check = max(self.dfs(set_of_cells, (i, 0), who), check)
+            return check
+        return False
+    def estimate(self, depth):
+        cnt1 = 0
+        cnt2 = 0
+        buf_matrix = self.matrix.astype(np.int8) + 1
+        buf_matrix = buf_matrix.reshape(1, buf_matrix.size)[0]
+        cnz = np.count_nonzero(buf_matrix)
+        cz = buf_matrix.size - cnz
+        mask = np.append(np.ones(cz//2, dtype=np.int8), np.zeros(cz - (cz//2), dtype=np.int8))
+        for i in range(depth):
+            np.random.shuffle(mask)
+            self.buf_matrix = self.matrix.astype(np.int8) + 1
+            self.buf_matrix[self.buf_matrix == 0] = mask + 1
+            self.buf_matrix = self.buf_matrix - 1
+            if self.isWin(0, self.buf_matrix): cnt1+=1
+            if self.isWin(1, self.buf_matrix): cnt2+=1
+        return (cnt1, cnt2)
+
+    def help_Garry_Kimovich(self, who):
+        ans = (0,0)
+        cnt = 0
+        for i in range(X_SIZE_FIELD):
+            for j in range(Y_SIZE_FIELD):
+                if self.matrix[i][j] == -1:
+                    self.matrix[i][j] = who
+                    if who == 0:
+                        buf,_ = self.estimate(10)
+                        if buf>cnt:
+                            cnt = buf
+                            ans = (i,j)
+                    if who == 1:
+                        _, buf = self.estimate(10)
+                        if buf>cnt:
+                            cnt = buf
+                            ans = (i,j)
+                    self.matrix[i][j] = -1
+        print(ans)
+        return ans
+
 
 
 # здесь происходит инициация, создание объектов и др.
